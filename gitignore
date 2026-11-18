@@ -1,0 +1,15 @@
+# Environment variables and local secrets
+.env
+.env.*
+!.env.example
+
+# Node.js dependencies (for future backend work)
+node_modules/
+
+# Logs and temporary files
+*.log
+.DS_Store
+Thumbs.db
+
+# Local editor settings
+.vscode/
