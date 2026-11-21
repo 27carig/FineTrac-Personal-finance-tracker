@@ -1,5 +1,6 @@
 document.addEventListener("DOMContentLoaded", () => {
     // Get HTML elements.
+    const STORAGE_KEY = "finetrac-expenses";
     const yearElement = document.getElementById("current-year");
     const expenseForm = document.getElementById("expense-form");
     const formStatus = document.getElementById("form-status");
@@ -26,7 +27,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // Stores expenses during the current session.
     // Permanent browser storage will be added in a later.
-    let expenses = [];
+    let expenses = loadExpenses();
 
     const allowedCategories = [
         "Food",
@@ -53,6 +54,63 @@ document.addEventListener("DOMContentLoaded", () => {
     function showMessage(message, type) {
         formStatus.textContent = message;
         formStatus.className = `alert alert-${type} mt-3 mb-0`;
+    }
+
+    // Load expenses from localStorage.
+    function loadExpenses() {
+        try {
+            const savedExpenses = localStorage.getItem(STORAGE_KEY);
+
+            // Return an empty array if nothing has been saved.
+            if (!savedExpenses) {
+                return [];
+            }
+
+            const parsedExpenses = JSON.parse(savedExpenses);
+
+            // Make sure the stored data is an array.
+            if (!Array.isArray(parsedExpenses)) {
+                throw new Error("Invalid expense data.");
+            }
+
+            // Only keep records with the expected data types.
+            return parsedExpenses.filter((expense) => {
+                return expense &&
+                    typeof expense.id === "string" &&
+                    typeof expense.description === "string" &&
+                    Number.isFinite(expense.amount) &&
+                    typeof expense.date === "string" &&
+                    typeof expense.category === "string" &&
+                    Number.isFinite(expense.createdAt);
+            });
+
+        } catch (error) {
+            console.error("Error loading expenses:", error);
+
+            showMessage(
+                "Saved expenses could not be loaded. Check the browser console.",
+                "warning"
+            );
+
+            return [];
+        }
+    }
+
+    // Save the current expense collection to localStorage.
+    function saveExpenses() {
+        try {
+            localStorage.setItem(
+                STORAGE_KEY,
+                JSON.stringify(expenses)
+            );
+
+            return true;
+
+        } catch (error) {
+            console.error("Error saving expenses:", error);
+
+            return false;
+        }
     }
 
     // Validate expense description.
@@ -291,6 +349,9 @@ document.addEventListener("DOMContentLoaded", () => {
         // Add the expense to the collection.
         expenses.push(newExpense);
 
+        // Save the updated expense collection to localStorage.
+        const saved = saveExpenses();
+
         // Refresh the expense history and dashboard.
         renderExpenses();
         updateSummary();
@@ -298,7 +359,13 @@ document.addEventListener("DOMContentLoaded", () => {
         // Clear the form.
         expenseForm.reset();
 
-        showMessage("Expense added successfully!", "success");
+        if (saved) {
+            showMessage("Expense added successfully!", "success");
+        } 
+        
+        else {
+            showMessage("Expense added, but it could not be saved. Check the browser console.", "warning");
+        }
     });
 
     // Revalidate fields when the user changes their input.
