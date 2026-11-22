@@ -1,3 +1,5 @@
+// FineTrac - Expense Management
+
 document.addEventListener("DOMContentLoaded", () => {
     // Get HTML elements.
     const yearElement = document.getElementById("current-year");
@@ -282,12 +284,20 @@ document.addEventListener("DOMContentLoaded", () => {
             const actionsCell = document.createElement("td");
             const editButton = document.createElement("button");
             editButton.type = "button";
-            editButton.className = "btn btn-sm btn-outline-primary";
+            editButton.className = "btn btn-sm btn-outline-primary me-1";
             editButton.textContent = "Edit";
             editButton.dataset.action = "edit";
             editButton.setAttribute("aria-label", `Edit ${expense.description}`);
 
+            const deleteButton = document.createElement("button");
+            deleteButton.type = "button";
+            deleteButton.className = "btn btn-sm btn-outline-danger";
+            deleteButton.textContent = "Delete";
+            deleteButton.dataset.action = "delete";
+            deleteButton.setAttribute("aria-label", `Delete ${expense.description}`);
+
             actionsCell.appendChild(editButton);
+            actionsCell.appendChild(deleteButton);
             row.appendChild(actionsCell);
             expenseList.appendChild(row);
         });
@@ -315,23 +325,59 @@ document.addEventListener("DOMContentLoaded", () => {
         descriptionInput.focus({ preventScroll: true });
     }
 
-    // Handle Edit button clicks using event delegation.
+    // Handle Edit and Delete button clicks using event delegation.
     expenseList.addEventListener("click", (event) => {
-        const editButton = event.target.closest('button[data-action="edit"]');
+        const actionButton = event.target.closest("button[data-action]");
 
-        if (!editButton) {
+        if (!actionButton) {
             return;
         }
 
-        const row = editButton.closest("tr");
-        const expense = expenses.find((item) => item.id === row?.dataset.expenseId);
+        const row = actionButton.closest("tr");
+        const expenseId = row?.dataset.expenseId;
+        const expense = expenses.find((item) => item.id === expenseId);
 
         if (!expense) {
             showMessage("The selected expense could not be found.", "danger");
             return;
         }
 
-        startEditing(expense);
+        if (actionButton.dataset.action === "edit") {
+            startEditing(expense);
+            return;
+        }
+
+        if (actionButton.dataset.action === "delete") {
+            const confirmed = window.confirm(
+                `Are you sure you want to delete the expense "${expense.description}"?`
+            );
+
+            if (!confirmed) {
+                return;
+            }
+
+            // Exit edit mode if the deleted expense is currently being edited.
+            if (editingExpenseId === expenseId) {
+                expenseForm.reset();
+            }
+
+            // Remove the selected expense from the collection.
+            expenses = expenses.filter((item) => item.id !== expenseId);
+
+            // Save the updated collection and refresh the page.
+            const saved = saveExpenses();
+            renderExpenses();
+            updateSummary();
+
+            if (saved) {
+                showMessage("Expense deleted successfully!", "success");
+            } else {
+                showMessage(
+                    "Expense deleted from this session, but the change could not be saved permanently.",
+                    "warning"
+                );
+            }
+        }
     });
 
     // Handle new expense submissions and updates to existing expenses.
