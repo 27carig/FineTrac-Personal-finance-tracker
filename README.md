@@ -1,16 +1,20 @@
-FineTrac - Expense Form Baseline
+# FineTrac - Expense Add Fix
 
-This folder contains the base page files for the next development stage:
-- index.html: dashboard structure, expense form, and expense history table
-- css/styles.css: page and form styling
-- js/app.js: current-year footer and a temporary form message
+This is a compatibility fix for the JavaScript module refactor.
 
-IMPORTANT:
-The expense form is currently a layout only. It does not save or delete
-and the expense history table is not connected to a database. Those features should be added in later commits.
+## Install
 
-To use these files:
-1. Open your existing FineTrac-Personal-finance-tracker repository folder.
-2. Replace its index.html, css/styles.css, and js/app.js with the matching files here.
-3. Keep your existing README.md and .gitignore unless the team agrees to change them.
-4. Open index.html in a browser.
+1. Keep the complete `js/` folder together. Do not copy only `app.js`; it imports the other modules.
+2. Make sure the project root `index.html` loads the entry point as a JavaScript module:
+
+3. Run the site using VS Code Live Server (do not open index.html directly from the downloads folder)
+4. Hard-refresh the browser with Ctrl+Shift+R.
+
+## What changed
+
+- The core expense form and table can initialize even if the optional history-filter controls are missing from an older `index.html`.
+- Startup reports the exact required HTML selectors that are missing in the browser console.
+- The entry point initializes safely whether the module executes before or after `DOMContentLoaded`.
+- The rest of the modules preserve expense creation, editing, deleting, validation, filtering, and localStorage behavior.
+
+The application still uses browser `localStorage` for prototype persistence. It is not a replacement for the planned AWS backend.

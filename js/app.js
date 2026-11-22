@@ -1,54 +1,65 @@
-// FineTrac - Expense Management
+// FineTrac - Main Application
 
-document.addEventListener("DOMContentLoaded", () => {
-    // Get HTML elements.
-    const yearElement = document.getElementById("current-year");
-    const expenseForm = document.getElementById("expense-form");
-    const formStatus = document.getElementById("form-status");
-    const expenseList = document.getElementById("expense-list");
+import { clearFieldValidation, updateFieldValidation, validateExpenseFields } from "./validation.js";
+import { loadExpenses, saveExpenses } from "./storage.js";
+import { addExpense, deleteExpense, updateExpense } from "./expenseManager.js";
+import { filterExpenses } from "./filters.js";
+import { renderExpenseHistory, updateDashboardSummary } from "./expenseDisplay.js";
 
-    const descriptionInput = document.getElementById("expense-description");
-    const amountInput = document.getElementById("expense-amount");
-    const dateInput = document.getElementById("expense-date");
-    const categoryInput = document.getElementById("expense-category");
+// Module scripts run after HTML parsing. This check also supports loading the
+// module after DOMContentLoaded has already fired (for example, in a console).
+if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initializeApp, { once: true });
+} else {
+    initializeApp();
+}
 
-    const totalSpending = document.getElementById("total-spending");
-    const monthSpending = document.getElementById("month-spending");
-    const transactionCount = document.getElementById("transaction-count");
+function initializeApp() {
+    const elements = {
+        year: document.getElementById("current-year"),
+        form: document.getElementById("expense-form"),
+        formStatus: document.getElementById("form-status"),
+        expenseList: document.getElementById("expense-list"),
+        description: document.getElementById("expense-description"),
+        amount: document.getElementById("expense-amount"),
+        date: document.getElementById("expense-date"),
+        category: document.getElementById("expense-category"),
+        totalSpending: document.getElementById("total-spending"),
+        monthSpending: document.getElementById("month-spending"),
+        transactionCount: document.getElementById("transaction-count"),
+        categoryFilter: document.getElementById("history-category-filter"),
+        startDateFilter: document.getElementById("history-start-date"),
+        endDateFilter: document.getElementById("history-end-date"),
+        clearFiltersButton: document.getElementById("clear-history-filters"),
+        filterStatus: document.getElementById("history-filter-status")
+    };
 
-    const submitButton = expenseForm?.querySelector('button[type="submit"]');
-    const formActions = expenseForm?.querySelector(".form-actions");
+    const submitButton = elements.form?.querySelector('button[type="submit"]');
+    const formActions = elements.form?.querySelector(".form-actions");
 
-    if (
-        !expenseForm || !formStatus || !expenseList ||
-        !descriptionInput || !amountInput || !dateInput || !categoryInput ||
-        !submitButton || !formActions
-    ) {
-        console.error("FineTrac could not find all required HTML elements.");
+    // The filter controls are optional. Their absence should never disable
+    // the core expense form, history table, or dashboard.
+    const missingElements = getMissingRequiredElements(elements, submitButton, formActions);
+
+    if (missingElements.length > 0) {
+        console.error(
+            "FineTrac could not start because these required HTML elements are missing:",
+            missingElements.join(", ")
+        );
         return;
     }
 
-    const STORAGE_KEY = "finetrac-expenses";
-    const allowedCategories = [
-        "Food",
-        "Transportation",
-        "Entertainment",
-        "Bills",
-        "Other"
-    ];
-
-    const currencyFormatter = new Intl.NumberFormat("en-US", {
-        style: "currency",
-        currency: "USD"
-    });
-
-    // Track which expense is currently being edited.
+    const loadedData = loadExpenses();
+    let expenses = loadedData.expenses;
     let editingExpenseId = null;
 
-    // Load previously saved expenses from localStorage.
-    let expenses = loadExpenses();
+    const fields = [
+        { element: elements.description, name: "description" },
+        { element: elements.amount, name: "amount" },
+        { element: elements.date, name: "date" },
+        { element: elements.category, name: "category" }
+    ];
 
-    // Create a Cancel Edit button without requiring an HTML change.
     const cancelEditButton = document.createElement("button");
     cancelEditButton.type = "button";
     cancelEditButton.className = "btn btn-outline-secondary";
@@ -56,278 +67,148 @@ document.addEventListener("DOMContentLoaded", () => {
     cancelEditButton.hidden = true;
     formActions.appendChild(cancelEditButton);
 
-    // Automatically update the footer year.
-    if (yearElement) {
-        yearElement.textContent = new Date().getFullYear();
+    elements.form.noValidate = true;
+
+    if (elements.year) {
+        elements.year.textContent = new Date().getFullYear();
     }
 
-    // Let JavaScript handle form validation.
-    expenseForm.noValidate = true;
-
-    // Display success or error messages.
-    function showMessage(message, type) {
-        formStatus.textContent = message;
-        formStatus.className = `alert alert-${type} mt-3 mb-0`;
+    function showFormMessage(message, type) {
+        elements.formStatus.textContent = message;
+        elements.formStatus.className = `alert alert-${type} mt-3 mb-0`;
+        elements.formStatus.classList.remove("d-none");
     }
 
-    // Load expenses from localStorage.
-    function loadExpenses() {
-        try {
-            const savedExpenses = localStorage.getItem(STORAGE_KEY);
-
-            if (!savedExpenses) {
-                return [];
-            }
-
-            const parsedExpenses = JSON.parse(savedExpenses);
-
-            if (!Array.isArray(parsedExpenses)) {
-                throw new Error("Saved expense data is not an array.");
-            }
-
-            return parsedExpenses.filter((expense) => {
-                return expense &&
-                    typeof expense.id === "string" &&
-                    typeof expense.description === "string" &&
-                    Number.isFinite(expense.amount) &&
-                    expense.amount > 0 &&
-                    typeof expense.date === "string" &&
-                    allowedCategories.includes(expense.category) &&
-                    Number.isFinite(expense.createdAt);
-            });
-        } catch (error) {
-            console.error("Error loading expenses:", error);
-            showMessage(
-                "Saved expenses could not be loaded. Check the browser console.",
-                "warning"
-            );
-            return [];
-        }
+    function getFormValues() {
+        return {
+            description: elements.description.value,
+            amount: elements.amount.value,
+            date: elements.date.value,
+            category: elements.category.value,
+            amountStepMismatch: elements.amount.validity.stepMismatch
+        };
     }
 
-    // Save the current expense collection to localStorage.
-    function saveExpenses() {
-        try {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(expenses));
-            return true;
-        } catch (error) {
-            console.error("Error saving expenses:", error);
-            return false;
-        }
-    }
+    function validateForm() {
+        const errors = validateExpenseFields(getFormValues());
 
-    // Validate expense description.
-    function validateDescription() {
-        const description = descriptionInput.value.trim();
-
-        if (description.length === 0) {
-            return "Description cannot be empty.";
-        }
-
-        if (description.length > 80) {
-            return "Description cannot exceed 80 characters.";
-        }
-
-        return "";
-    }
-
-    // Validate expense amount.
-    function validateAmount() {
-        const amount = amountInput.value.trim();
-
-        if (amount === "") {
-            return "Please enter an expense amount.";
-        }
-
-        const number = Number(amount);
-
-        if (!Number.isFinite(number) || number <= 0) {
-            return "Amount must be greater than zero.";
-        }
-
-        if (number > 999999.99) {
-            return "Amount cannot exceed $999,999.99.";
-        }
-
-        if (amountInput.validity.stepMismatch) {
-            return "Amount can only have two decimal places.";
-        }
-
-        return "";
-    }
-
-    // Validate expense date.
-    function validateDate() {
-        if (dateInput.value === "") {
-            return "Please select an expense date.";
-        }
-
-        if (!dateInput.validity.valid) {
-            return "Please enter a valid date.";
-        }
-
-        return "";
-    }
-
-    // Validate expense category.
-    function validateCategory() {
-        if (!allowedCategories.includes(categoryInput.value)) {
-            return "Please select a valid category.";
-        }
-
-        return "";
-    }
-
-    // Update field styling based on validation.
-    function updateField(field, error) {
-        field.classList.toggle("is-invalid", Boolean(error));
-        field.classList.toggle("is-valid", !error);
-        field.setAttribute("aria-invalid", error ? "true" : "false");
-    }
-
-    const validators = [
-        { field: descriptionInput, validate: validateDescription },
-        { field: amountInput, validate: validateAmount },
-        { field: dateInput, validate: validateDate },
-        { field: categoryInput, validate: validateCategory }
-    ];
-
-    // Generate a unique ID for each new expense.
-    function generateExpenseId() {
-        return Date.now().toString() + Math.random().toString(16).slice(2);
-    }
-
-    // Format dates for the history table.
-    function formatDate(dateString) {
-        const [year, month, day] = dateString.split("-").map(Number);
-        const date = new Date(year, month - 1, day);
-
-        return date.toLocaleDateString("en-US", {
-            month: "short",
-            day: "numeric",
-            year: "numeric"
-        });
-    }
-
-    // Update dashboard spending summaries.
-    function updateSummary() {
-        const total = expenses.reduce((sum, expense) => sum + expense.amount, 0);
-        const today = new Date();
-
-        const currentMonthTotal = expenses.reduce((sum, expense) => {
-            const [year, month] = expense.date.split("-").map(Number);
-
-            if (year === today.getFullYear() && month === today.getMonth() + 1) {
-                return sum + expense.amount;
-            }
-
-            return sum;
-        }, 0);
-
-        if (totalSpending) {
-            totalSpending.textContent = currencyFormatter.format(total);
-        }
-
-        if (monthSpending) {
-            monthSpending.textContent = currencyFormatter.format(currentMonthTotal);
-        }
-
-        if (transactionCount) {
-            transactionCount.textContent = expenses.length;
-        }
-    }
-
-    // Create table cells safely using textContent.
-    function createCell(value, className = "") {
-        const cell = document.createElement("td");
-        cell.textContent = value;
-
-        if (className) {
-            cell.className = className;
-        }
-
-        return cell;
-    }
-
-    // Display all expenses in the history table.
-    function renderExpenses() {
-        expenseList.replaceChildren();
-
-        if (expenses.length === 0) {
-            const row = document.createElement("tr");
-            const cell = document.createElement("td");
-
-            cell.colSpan = 5;
-            cell.className = "empty-state";
-            cell.textContent = "No expenses have been added yet.";
-
-            row.appendChild(cell);
-            expenseList.appendChild(row);
-            return;
-        }
-
-        const sortedExpenses = [...expenses].sort((a, b) => {
-            return b.date.localeCompare(a.date) || b.createdAt - a.createdAt;
+        fields.forEach(({ element, name }) => {
+            updateFieldValidation(element, errors[name] || "");
         });
 
-        sortedExpenses.forEach((expense) => {
-            const row = document.createElement("tr");
-            row.dataset.expenseId = expense.id;
-
-            row.appendChild(createCell(formatDate(expense.date)));
-            row.appendChild(createCell(expense.description));
-            row.appendChild(createCell(expense.category));
-            row.appendChild(
-                createCell(currencyFormatter.format(expense.amount), "text-end")
-            );
-
-            const actionsCell = document.createElement("td");
-            const editButton = document.createElement("button");
-            editButton.type = "button";
-            editButton.className = "btn btn-sm btn-outline-primary me-1";
-            editButton.textContent = "Edit";
-            editButton.dataset.action = "edit";
-            editButton.setAttribute("aria-label", `Edit ${expense.description}`);
-
-            const deleteButton = document.createElement("button");
-            deleteButton.type = "button";
-            deleteButton.className = "btn btn-sm btn-outline-danger";
-            deleteButton.textContent = "Delete";
-            deleteButton.dataset.action = "delete";
-            deleteButton.setAttribute("aria-label", `Delete ${expense.description}`);
-
-            actionsCell.appendChild(editButton);
-            actionsCell.appendChild(deleteButton);
-            row.appendChild(actionsCell);
-            expenseList.appendChild(row);
-        });
+        return errors;
     }
 
-    // Start editing an existing expense.
+    function persistExpenses() {
+        return saveExpenses(expenses);
+    }
+
+    function renderAll() {
+        const filterResult = filterExpenses(expenses, {
+            category: elements.categoryFilter?.value || "",
+            startDate: elements.startDateFilter?.value || "",
+            endDate: elements.endDateFilter?.value || ""
+        });
+
+        if (elements.filterStatus) {
+            elements.filterStatus.textContent = filterResult.message;
+            elements.filterStatus.className = filterResult.valid
+                ? "small text-muted mt-2 mb-0"
+                : "small text-danger mt-2 mb-0";
+        }
+
+        let emptyMessage = "No expenses match the selected filters.";
+
+        if (!filterResult.valid) {
+            emptyMessage = "Please adjust the selected date range.";
+        } else if (expenses.length === 0) {
+            emptyMessage = "No expenses have been added yet.";
+        }
+
+        renderExpenseHistory(filterResult.expenses, elements.expenseList, emptyMessage);
+        updateDashboardSummary(expenses, elements);
+    }
+
+    function resetEditState() {
+        editingExpenseId = null;
+        submitButton.textContent = "Save Expense";
+        cancelEditButton.hidden = true;
+    }
+
     function startEditing(expense) {
         editingExpenseId = expense.id;
 
-        descriptionInput.value = expense.description;
-        amountInput.value = expense.amount.toFixed(2);
-        dateInput.value = expense.date;
-        categoryInput.value = expense.category;
+        elements.description.value = expense.description;
+        elements.amount.value = expense.amount.toFixed(2);
+        elements.date.value = expense.date;
+        elements.category.value = expense.category;
 
         submitButton.textContent = "Update Expense";
         cancelEditButton.hidden = false;
-        formStatus.classList.add("d-none");
+        elements.formStatus.classList.add("d-none");
 
-        // Show valid styling for the values loaded into the form.
-        validators.forEach(({ field, validate }) => {
-            updateField(field, validate());
-        });
-
-        expenseForm.scrollIntoView({ behavior: "smooth", block: "start" });
-        descriptionInput.focus({ preventScroll: true });
+        validateForm();
+        elements.form.scrollIntoView({ behavior: "smooth", block: "start" });
+        elements.description.focus({ preventScroll: true });
     }
 
-    // Handle Edit and Delete button clicks using event delegation.
-    expenseList.addEventListener("click", (event) => {
-        const actionButton = event.target.closest("button[data-action]");
+    // Add or update an expense after validating all form fields.
+    elements.form.addEventListener("submit", (event) => {
+        event.preventDefault();
+
+        const errors = validateForm();
+        const firstError = fields.find(({ name }) => errors[name]);
+
+        if (firstError) {
+            const errorMessages = Object.values(errors).join(" ");
+            showFormMessage(`Please correct the following errors: ${errorMessages}`, "danger");
+            firstError.element.focus();
+            return;
+        }
+
+        const expenseDetails = {
+            description: elements.description.value.trim(),
+            amount: Number(elements.amount.value),
+            date: elements.date.value,
+            category: elements.category.value
+        };
+
+        const wasEditing = editingExpenseId !== null;
+
+        if (wasEditing) {
+            const updatedExpenses = updateExpense(expenses, editingExpenseId, expenseDetails);
+
+            if (!updatedExpenses) {
+                showFormMessage("The expense being edited could not be found.", "danger");
+                return;
+            }
+
+            expenses = updatedExpenses;
+        } else {
+            const result = addExpense(expenses, expenseDetails);
+            expenses = result.expenses;
+        }
+
+        const saveResult = persistExpenses();
+        renderAll();
+        elements.form.reset();
+
+        if (saveResult.success) {
+            showFormMessage(
+                wasEditing ? "Expense updated successfully!" : "Expense added successfully!",
+                "success"
+            );
+        } else {
+            showFormMessage(saveResult.error, "warning");
+        }
+    });
+
+    // Handle Edit and Delete with one listener on the expense table.
+    elements.expenseList.addEventListener("click", (event) => {
+        const clickedElement = event.target;
+        const actionButton = clickedElement instanceof Element
+            ? clickedElement.closest("button[data-action]")
+            : null;
 
         if (!actionButton) {
             return;
@@ -335,163 +216,104 @@ document.addEventListener("DOMContentLoaded", () => {
 
         const row = actionButton.closest("tr");
         const expenseId = row?.dataset.expenseId;
-        const expense = expenses.find((item) => item.id === expenseId);
+        const selectedExpense = expenses.find((expense) => expense.id === expenseId);
 
-        if (!expense) {
-            showMessage("The selected expense could not be found.", "danger");
+        if (!selectedExpense) {
+            showFormMessage("The selected expense could not be found.", "danger");
             return;
         }
 
         if (actionButton.dataset.action === "edit") {
-            startEditing(expense);
+            startEditing(selectedExpense);
             return;
         }
 
         if (actionButton.dataset.action === "delete") {
             const confirmed = window.confirm(
-                `Are you sure you want to delete the expense "${expense.description}"?`
+                `Are you sure you want to delete the expense "${selectedExpense.description}"?`
             );
 
             if (!confirmed) {
                 return;
             }
 
-            // Exit edit mode if the deleted expense is currently being edited.
             if (editingExpenseId === expenseId) {
-                expenseForm.reset();
+                elements.form.reset();
             }
 
-            // Remove the selected expense from the collection.
-            expenses = expenses.filter((item) => item.id !== expenseId);
+            const result = deleteExpense(expenses, expenseId);
+            expenses = result.expenses;
 
-            // Save the updated collection and refresh the page.
-            const saved = saveExpenses();
-            renderExpenses();
-            updateSummary();
+            const saveResult = persistExpenses();
+            renderAll();
 
-            if (saved) {
-                showMessage("Expense deleted successfully!", "success");
-            } else {
-                showMessage(
-                    "Expense deleted from this session, but the change could not be saved permanently.",
-                    "warning"
-                );
-            }
+            showFormMessage(
+                saveResult.success
+                    ? "Expense deleted successfully!"
+                    : saveResult.error,
+                saveResult.success ? "success" : "warning"
+            );
         }
     });
 
-    // Handle new expense submissions and updates to existing expenses.
-    expenseForm.addEventListener("submit", (event) => {
-        event.preventDefault();
+    // Cancel editing without changing the existing expense.
+    cancelEditButton.addEventListener("click", () => {
+        elements.form.reset();
+        showFormMessage("Editing cancelled. The existing expense was not changed.", "info");
+    });
 
-        const errors = [];
-
-        validators.forEach(({ field, validate }) => {
-            const error = validate();
-            updateField(field, error);
-
-            if (error) {
-                errors.push(error);
-            }
-        });
-
-        if (errors.length > 0) {
-            showMessage(
-                "Please correct the following errors: " + errors.join(" "),
-                "danger"
-            );
-
-            expenseForm.querySelector(".is-invalid")?.focus();
-            return;
-        }
-
-        const expenseDetails = {
-            description: descriptionInput.value.trim(),
-            amount: Number(amountInput.value),
-            date: dateInput.value,
-            category: categoryInput.value
+    // Validate fields as the user edits them.
+    fields.forEach(({ element, name }) => {
+        const validateSingleField = () => {
+            const errors = validateExpenseFields(getFormValues());
+            updateFieldValidation(element, errors[name] || "");
+            elements.formStatus.classList.add("d-none");
         };
 
-        if (editingExpenseId) {
-            const expenseIndex = expenses.findIndex(
-                (expense) => expense.id === editingExpenseId
-            );
-
-            if (expenseIndex === -1) {
-                showMessage("The expense being edited could not be found.", "danger");
-                return;
-            }
-
-            // Preserve the original ID and creation timestamp.
-            expenses[expenseIndex] = {
-                ...expenses[expenseIndex],
-                ...expenseDetails
-            };
-        } else {
-            // Create a new expense.
-            expenses.push({
-                id: generateExpenseId(),
-                ...expenseDetails,
-                createdAt: Date.now()
-            });
-        }
-
-        const wasEditing = editingExpenseId !== null;
-        const saved = saveExpenses();
-
-        renderExpenses();
-        updateSummary();
-        expenseForm.reset();
-
-        if (saved) {
-            showMessage(
-                wasEditing ? "Expense updated successfully!" : "Expense added and saved successfully!",
-                "success"
-            );
-        } else {
-            showMessage(
-                wasEditing
-                    ? "Expense updated in this session, but could not be saved permanently."
-                    : "Expense added in this session, but could not be saved permanently.",
-                "warning"
-            );
-        }
+        element.addEventListener("input", validateSingleField);
+        element.addEventListener("change", validateSingleField);
     });
 
-    // Cancel the current edit without changing the saved expense.
-    cancelEditButton.addEventListener("click", () => {
-        expenseForm.reset();
-        showMessage("Editing cancelled. The existing expense was not changed.", "info");
+    // Register filter listeners only when those controls exist in the HTML.
+    [elements.categoryFilter, elements.startDateFilter, elements.endDateFilter]
+        .filter(Boolean)
+        .forEach((filter) => filter.addEventListener("change", renderAll));
+
+    elements.clearFiltersButton?.addEventListener("click", () => {
+        if (elements.categoryFilter) elements.categoryFilter.value = "";
+        if (elements.startDateFilter) elements.startDateFilter.value = "";
+        if (elements.endDateFilter) elements.endDateFilter.value = "";
+        renderAll();
     });
 
-    // Revalidate fields when the user changes their input.
-    validators.forEach(({ field, validate }) => {
-        field.addEventListener("input", () => {
-            updateField(field, validate());
-            formStatus.classList.add("d-none");
-        });
-
-        field.addEventListener("change", () => {
-            updateField(field, validate());
-            formStatus.classList.add("d-none");
-        });
+    // Reset validation and exit edit mode when the form is cleared.
+    elements.form.addEventListener("reset", () => {
+        resetEditState();
+        fields.forEach(({ element }) => clearFieldValidation(element));
+        elements.formStatus.classList.add("d-none");
     });
 
-    // Reset validation styling and exit edit mode when the form is cleared.
-    expenseForm.addEventListener("reset", () => {
-        editingExpenseId = null;
-        submitButton.textContent = "Save Expense";
-        cancelEditButton.hidden = true;
+    renderAll();
 
-        validators.forEach(({ field }) => {
-            field.classList.remove("is-valid", "is-invalid");
-            field.removeAttribute("aria-invalid");
-        });
+    if (loadedData.error) {
+        showFormMessage(loadedData.error, "warning");
+    }
+}
 
-        formStatus.classList.add("d-none");
-    });
+function getMissingRequiredElements(elements, submitButton, formActions) {
+    const requiredElements = [
+        ["#expense-form", elements.form],
+        ["#form-status", elements.formStatus],
+        ["#expense-list", elements.expenseList],
+        ["#expense-description", elements.description],
+        ["#expense-amount", elements.amount],
+        ["#expense-date", elements.date],
+        ["#expense-category", elements.category],
+        ['button[type="submit"]', submitButton],
+        [".form-actions", formActions]
+    ];
 
-    // Initialize the dashboard with saved expenses.
-    renderExpenses();
-    updateSummary();
-});
+    return requiredElements
+        .filter(([, element]) => !element)
+        .map(([selector]) => selector);
+}

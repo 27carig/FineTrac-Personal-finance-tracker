@@ -236,3 +236,29 @@ h2 {
         padding: 1rem;
     }
 }
+
+/* Expense history filter panel and action buttons. */
+.expense-filters {
+    padding: 1rem;
+    background-color: #f8faf9;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+}
+
+.expense-filters .form-label {
+    margin-bottom: 0.4rem;
+}
+
+.expenses-table .expense-actions {
+    white-space: nowrap;
+}
+
+.expenses-table .expense-actions .btn {
+    margin-bottom: 0.15rem;
+}
+
+@media (max-width: 575.98px) {
+    .expenses-table .expense-actions .btn {
+        margin-bottom: 0.35rem;
+    }
+}
